@@ -1,5 +1,5 @@
 require("dotenv").config();
-
+const db = require("./config/firebase");
 
 const express = require("express")
 
@@ -7,48 +7,74 @@ const app = express();
 
 app.use(express.json());
 
-app.get("/",(req,res)=>{
+app.get("/", (req, res) => {
     res.json({
-        message:"API is working"
+        message: "API is working"
     })
 })
 
-app.post("/api/feedback", (req, res) => {
+app.post("/api/feedback", async (req, res) => {
 
-    const authorization = req.headers.authorization;
+    try {
+        const authorization = req.headers.authorization;
 
-    if (!authorization) {
-        return res.status(401).json({
-            message: "Missing authorization token"
+        if (!authorization) {
+            return res.status(401).json({
+                message: "Missing authorization token"
+            });
+        }
+
+        const token = authorization.replace("Bearer ", "");
+
+        if (token !== process.env.WEBHOOK_TOKEN) {
+            return res.status(401).json({
+                message: "Unauthorized"
+            });
+        }
+
+        const {
+            submitted_at,
+            parent_name,
+            student_name,
+            class_label,
+            rating,
+            rebook,
+            contact_request,
+            comments
+        } = req.body;
+
+        const feedback = {
+            submitted_at,
+            parent_name,
+            student_name,
+            class_label,
+            rating,
+            rebook,
+            contact_request,
+            comments,
+            created_at: new Date()
+        };
+
+        const docRef = await db.collection("feedback").add(feedback);
+
+        console.log("Feedback saved:", docRef.id);
+
+        return res.status(201).json({
+            message: "Feedback received and saved",
+            id: docRef.id
         });
-    }
+    }catch(error){
+        console.error("Error saving feedback:", error);
 
-    const token = authorization.replace("Bearer ", "");
-
-    if (token !== process.env.WEBHOOK_TOKEN) {
-        return res.status(401).json({
-            message: "Unauthorized"
-        });
-    }
-
-    const {
-        submitted_at,
-        parent_name,
-        student_name,
-        class_label,
-        rating,
-        rebook,
-        contact_request,
-        comments
-    } = req.body;
-
-    console.log("Received feedback:", req.body);
-
-    return res.status(201).json({
-        message: "Feedback received"
+    return res.status(500).json({
+      message: "Failed to save feedback"
     });
+    }
+
+
+   
 });
 
-app.listen(3000,()=>{
+app.listen(3000, () => {
     console.log("Server running on http://localhost:3000");
 })
