@@ -1,6 +1,8 @@
 require("dotenv").config();
 const {db} = require("./config/firebase");
 
+const { summarizeFeedback } = require("./services/geminiService");
+
 const express = require("express");
 const { attachStaffProfile, hasFullAccess } = require("./middleware/authorize");
 const { authenticate } = require("./middleware/auth");
@@ -81,31 +83,25 @@ app.post("/api/feedback", async (req, res) => {
 });
 
 app.get("/api/feedback", authenticate, attachStaffProfile, async (req, res) => {
+  const feedback = await getFeedbackForStaff(req.staff);
+  res.json({ feedback });
+});
+
+app.get("/api/feedback/summary", authenticate, attachStaffProfile, async (req, res) => {
   const { staff } = req;
 
-  let query = db.collection("feedback").orderBy("created_at", "desc");
-
   if (!hasFullAccess(staff)) {
-    if (!staff.classes || staff.classes.length === 0) {
-      return res.json({ feedback: [] });
-    }
-    query = query.where("class_label", "in", staff.classes);
+    return res.status(403).json({ message: "Summaries are only available to leads and coordinators" });
   }
 
-  const snapshot = await query.get();
-
-  const feedback = snapshot.docs.map(doc => {
-    const data = doc.data();
-
-    if (!hasFullAccess(staff)) {
-      const { parent_name, contact_request, ...safeFields } = data;
-      return { id: doc.id, ...safeFields };
-    }
-
-    return { id: doc.id, ...data };
-  });
-
-  res.json({ feedback });
+  try {
+    const feedback = await getFeedbackForStaff(staff);
+    const summary = await summarizeFeedback(feedback);
+    res.json({ summary });
+  } catch (error) {
+    console.error("Error generating summary:", error);
+    res.status(500).json({ message: "Failed to generate summary" });
+  }
 });
 
 app.get("/api/me", authenticate, attachStaffProfile, (req, res) => {
@@ -118,6 +114,28 @@ app.get("/api/me", authenticate, attachStaffProfile, (req, res) => {
     classes: staff.classes,
   });
 });
+
+async function getFeedbackForStaff(staff) {
+  let query = db.collection("feedback").orderBy("created_at", "desc");
+
+  if (!hasFullAccess(staff)) {
+    if (!staff.classes || staff.classes.length === 0) {
+      return [];
+    }
+    query = query.where("class_label", "in", staff.classes);
+  }
+
+  const snapshot = await query.get();
+
+  return snapshot.docs.map((doc) => {
+    const data = doc.data();
+    if (!hasFullAccess(staff)) {
+      const { parent_name, contact_request, ...safeFields } = data;
+      return { id: doc.id, ...safeFields };
+    }
+    return { id: doc.id, ...data };
+  });
+}
 
 app.listen(3000, () => {
     console.log("Server running on http://localhost:3000");
