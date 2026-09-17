@@ -1,5 +1,5 @@
 require("dotenv").config();
-const {db} = require("./config/firebase");
+const { db } = require("./config/firebase");
 
 const { summarizeFeedback } = require("./services/geminiService");
 
@@ -9,10 +9,21 @@ const { authenticate } = require("./middleware/auth");
 const cors = require("cors");
 const app = express();
 
+const allowedOrigins = [
+    "http://localhost:5173",
+    "https://formfeedback-2b53b.web.app"
+];
+
 app.use(cors({
-    origin: "http://localhost:5173",
+    origin: function (origin, callback) {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error("Not allowed by CORS"));
+        }
+    },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
 app.use(express.json());
@@ -73,68 +84,68 @@ app.post("/api/feedback", async (req, res) => {
             message: "Feedback received and saved",
             id: docRef.id
         });
-    }catch(error){
+    } catch (error) {
         console.error("Error saving feedback:", error);
 
-    return res.status(500).json({
-      message: "Failed to save feedback"
-    });
-    }   
+        return res.status(500).json({
+            message: "Failed to save feedback"
+        });
+    }
 });
 
 app.get("/api/feedback", authenticate, attachStaffProfile, async (req, res) => {
-  const feedback = await getFeedbackForStaff(req.staff);
-  res.json({ feedback });
+    const feedback = await getFeedbackForStaff(req.staff);
+    res.json({ feedback });
 });
 
 app.get("/api/feedback/summary", authenticate, attachStaffProfile, async (req, res) => {
-  const { staff } = req;
+    const { staff } = req;
 
-  if (!hasFullAccess(staff)) {
-    return res.status(403).json({ message: "Summaries are only available to leads and coordinators" });
-  }
+    if (!hasFullAccess(staff)) {
+        return res.status(403).json({ message: "Summaries are only available to leads and coordinators" });
+    }
 
-  try {
-    const feedback = await getFeedbackForStaff(staff);
-    const summary = await summarizeFeedback(feedback);
-    res.json({ summary });
-  } catch (error) {
-    console.error("Error generating summary:", error);
-    res.status(500).json({ message: "Failed to generate summary" });
-  }
+    try {
+        const feedback = await getFeedbackForStaff(staff);
+        const summary = await summarizeFeedback(feedback);
+        res.json({ summary });
+    } catch (error) {
+        console.error("Error generating summary:", error);
+        res.status(500).json({ message: "Failed to generate summary" });
+    }
 });
 
 app.get("/api/me", authenticate, attachStaffProfile, (req, res) => {
-  const { staff } = req; // set by attachStaffProfile
+    const { staff } = req; // set by attachStaffProfile
 
-  res.json({
-    name: staff.name,
-    email: staff.email,
-    role: staff.role,
-    classes: staff.classes,
-  });
+    res.json({
+        name: staff.name,
+        email: staff.email,
+        role: staff.role,
+        classes: staff.classes,
+    });
 });
 
 async function getFeedbackForStaff(staff) {
-  let query = db.collection("feedback").orderBy("created_at", "desc");
+    let query = db.collection("feedback").orderBy("created_at", "desc");
 
-  if (!hasFullAccess(staff)) {
-    if (!staff.classes || staff.classes.length === 0) {
-      return [];
-    }
-    query = query.where("class_label", "in", staff.classes);
-  }
-
-  const snapshot = await query.get();
-
-  return snapshot.docs.map((doc) => {
-    const data = doc.data();
     if (!hasFullAccess(staff)) {
-      const { parent_name, contact_request, ...safeFields } = data;
-      return { id: doc.id, ...safeFields };
+        if (!staff.classes || staff.classes.length === 0) {
+            return [];
+        }
+        query = query.where("class_label", "in", staff.classes);
     }
-    return { id: doc.id, ...data };
-  });
+
+    const snapshot = await query.get();
+
+    return snapshot.docs.map((doc) => {
+        const data = doc.data();
+        if (!hasFullAccess(staff)) {
+            const { parent_name, contact_request, ...safeFields } = data;
+            return { id: doc.id, ...safeFields };
+        }
+        return { id: doc.id, ...data };
+    });
 }
 
 app.listen(3000, () => {
