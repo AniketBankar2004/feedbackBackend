@@ -1,9 +1,16 @@
 require("dotenv").config();
-const db = require("./config/firebase");
+const {db} = require("./config/firebase");
 
-const express = require("express")
-
+const express = require("express");
+const { attachStaffProfile, hasFullAccess } = require("./middleware/authorize");
+const { authenticate } = require("./middleware/auth");
+const cors = require("cors");
 const app = express();
+
+app.use(cors({
+  origin: "http://localhost:5173",
+  credentials: true, 
+}));
 
 app.use(express.json());
 
@@ -69,10 +76,46 @@ app.post("/api/feedback", async (req, res) => {
     return res.status(500).json({
       message: "Failed to save feedback"
     });
+    }   
+});
+
+app.get("/api/feedback", authenticate, attachStaffProfile, async (req, res) => {
+  const { staff } = req;
+
+  let query = db.collection("feedback").orderBy("created_at", "desc");
+
+  if (!hasFullAccess(staff)) {
+    if (!staff.classes || staff.classes.length === 0) {
+      return res.json({ feedback: [] });
+    }
+    query = query.where("class_label", "in", staff.classes);
+  }
+
+  const snapshot = await query.get();
+
+  const feedback = snapshot.docs.map(doc => {
+    const data = doc.data();
+
+    if (!hasFullAccess(staff)) {
+      const { parent_name, contact_request, ...safeFields } = data;
+      return { id: doc.id, ...safeFields };
     }
 
+    return { id: doc.id, ...data };
+  });
 
-   
+  res.json({ feedback });
+});
+
+app.get("/api/me", authenticate, attachStaffProfile, (req, res) => {
+  const { staff } = req; // set by attachStaffProfile
+
+  res.json({
+    name: staff.name,
+    email: staff.email,
+    role: staff.role,
+    classes: staff.classes,
+  });
 });
 
 app.listen(3000, () => {
